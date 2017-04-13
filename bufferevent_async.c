@@ -69,13 +69,6 @@
 #define SO_UPDATE_CONNECT_CONTEXT 0x7010
 #endif
 
-/* prototypes */
-static int be_async_enable(struct bufferevent *, short);
-static int be_async_disable(struct bufferevent *, short);
-static void be_async_destruct(struct bufferevent *);
-static int be_async_flush(struct bufferevent *, short, enum bufferevent_flush_mode);
-static int be_async_ctrl(struct bufferevent *, enum bufferevent_ctrl_op, union bufferevent_ctrl_data *);
-
 struct bufferevent_async {
 	struct bufferevent_private bev;
 	struct event_overlapped connect_overlapped;
@@ -86,18 +79,6 @@ struct bufferevent_async {
 	unsigned ok : 1;
 	unsigned read_added : 1;
 	unsigned write_added : 1;
-};
-
-const struct bufferevent_ops bufferevent_ops_async = {
-	"socket_async",
-	evutil_offsetof(struct bufferevent_async, bev.bev),
-	be_async_enable,
-	be_async_disable,
-	NULL, /* Unlink */
-	be_async_destruct,
-	bufferevent_generic_adj_timeouts_,
-	be_async_flush,
-	be_async_ctrl,
 };
 
 static inline struct bufferevent_async *
@@ -319,7 +300,7 @@ be_async_inbuf_callback(struct evbuffer *buf,
 	bufferevent_decref_and_unlock_(bev);
 }
 
-static int
+int
 be_async_enable(struct bufferevent *buf, short what)
 {
 	struct bufferevent_async *bev_async = upcast(buf);
@@ -347,7 +328,7 @@ be_async_enable(struct bufferevent *buf, short what)
 	return 0;
 }
 
-static int
+int
 be_async_disable(struct bufferevent *bev, short what)
 {
 	struct bufferevent_async *bev_async = upcast(bev);
@@ -367,7 +348,10 @@ be_async_disable(struct bufferevent *bev, short what)
 	return 0;
 }
 
-static void
+void
+be_async_unlink(struct bufferevent *bev) { }
+
+void
 be_async_destruct(struct bufferevent *bev)
 {
 	struct bufferevent_async *bev_async = upcast(bev);
@@ -400,7 +384,7 @@ bev_async_set_wsa_error(struct bufferevent *bev, struct event_overlapped *eo)
 	WSAGetOverlappedResult(fd, &eo->overlapped, &bytes, FALSE, &flags);
 }
 
-static int
+int
 be_async_flush(struct bufferevent *bev, short what,
     enum bufferevent_flush_mode mode)
 {
@@ -554,8 +538,8 @@ bufferevent_async_new_(struct event_base *base,
 		return NULL;
 	}
 
-	if (bufferevent_init_common_(&bev_a->bev, base, &bufferevent_ops_async,
-		options)<0)
+	if (bufferevent_init_common_(&bev_a->bev, base, BEV_TYPE_ASYNC,
+		evutil_offsetof(struct bufferevent_async, bev.bev),	options)<0)
 		goto err;
 
 	evbuffer_add_cb(bev->input, be_async_inbuf_callback, bev);
@@ -645,7 +629,7 @@ bufferevent_async_connect_(struct bufferevent *bev, evutil_socket_t fd,
 	return -1;
 }
 
-static int
+int
 be_async_ctrl(struct bufferevent *bev, enum bufferevent_ctrl_op op,
     union bufferevent_ctrl_data *data)
 {

@@ -76,25 +76,7 @@
 #endif
 
 /* prototypes */
-static int be_socket_enable(struct bufferevent *, short);
-static int be_socket_disable(struct bufferevent *, short);
-static void be_socket_destruct(struct bufferevent *);
-static int be_socket_flush(struct bufferevent *, short, enum bufferevent_flush_mode);
-static int be_socket_ctrl(struct bufferevent *, enum bufferevent_ctrl_op, union bufferevent_ctrl_data *);
-
 static void be_socket_setfd(struct bufferevent *, evutil_socket_t);
-
-const struct bufferevent_ops bufferevent_ops_socket = {
-	"socket",
-	evutil_offsetof(struct bufferevent_private, bev),
-	be_socket_enable,
-	be_socket_disable,
-	NULL, /* unlink */
-	be_socket_destruct,
-	bufferevent_generic_adj_existing_timeouts_,
-	be_socket_flush,
-	be_socket_ctrl,
-};
 
 const struct sockaddr*
 bufferevent_socket_get_conn_address_(struct bufferevent *bev)
@@ -354,8 +336,8 @@ bufferevent_socket_new(struct event_base *base, evutil_socket_t fd,
 	if ((bufev_p = mm_calloc(1, sizeof(struct bufferevent_private)))== NULL)
 		return NULL;
 
-	if (bufferevent_init_common_(bufev_p, base, &bufferevent_ops_socket,
-				    options) < 0) {
+	if (bufferevent_init_common_(bufev_p, base, BEV_TYPE_SOCKET,
+		evutil_offsetof(struct bufferevent_private, bev), options) < 0) {
 		mm_free(bufev_p);
 		return NULL;
 	}
@@ -572,7 +554,7 @@ bufferevent_new(evutil_socket_t fd,
 }
 
 
-static int
+int
 be_socket_enable(struct bufferevent *bufev, short event)
 {
 	if (event & EV_READ &&
@@ -584,7 +566,7 @@ be_socket_enable(struct bufferevent *bufev, short event)
 	return 0;
 }
 
-static int
+int
 be_socket_disable(struct bufferevent *bufev, short event)
 {
 	struct bufferevent_private *bufev_p =
@@ -601,7 +583,10 @@ be_socket_disable(struct bufferevent *bufev, short event)
 	return 0;
 }
 
-static void
+void
+be_socket_unlink(struct bufferevent *bufev) { }
+
+void
 be_socket_destruct(struct bufferevent *bufev)
 {
 	struct bufferevent_private *bufev_p =
@@ -617,7 +602,7 @@ be_socket_destruct(struct bufferevent *bufev)
 	evutil_getaddrinfo_cancel_async_(bufev_p->dns_request);
 }
 
-static int
+int
 be_socket_flush(struct bufferevent *bev, short iotype,
     enum bufferevent_flush_mode mode)
 {
@@ -700,7 +685,7 @@ done:
 	return res;
 }
 
-static int
+int
 be_socket_ctrl(struct bufferevent *bev, enum bufferevent_ctrl_op op,
     union bufferevent_ctrl_data *data)
 {

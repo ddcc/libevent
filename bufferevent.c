@@ -69,8 +69,9 @@ bufferevent_suspend_read_(struct bufferevent *bufev, bufferevent_suspend_flags w
 	struct bufferevent_private *bufev_private =
 	    EVUTIL_UPCAST(bufev, struct bufferevent_private, bev);
 	BEV_LOCK(bufev);
-	if (!bufev_private->read_suspended)
-		bufev->be_ops->disable(bufev, EV_READ);
+	if (!bufev_private->read_suspended) {
+		BEV_SWITCH(bufev, disable, bufev, EV_READ)
+	}
 	bufev_private->read_suspended |= what;
 	BEV_UNLOCK(bufev);
 }
@@ -82,8 +83,9 @@ bufferevent_unsuspend_read_(struct bufferevent *bufev, bufferevent_suspend_flags
 	    EVUTIL_UPCAST(bufev, struct bufferevent_private, bev);
 	BEV_LOCK(bufev);
 	bufev_private->read_suspended &= ~what;
-	if (!bufev_private->read_suspended && (bufev->enabled & EV_READ))
-		bufev->be_ops->enable(bufev, EV_READ);
+	if (!bufev_private->read_suspended && (bufev->enabled & EV_READ)) {
+		BEV_SWITCH(bufev, enable, bufev, EV_READ);
+	}
 	BEV_UNLOCK(bufev);
 }
 
@@ -93,8 +95,9 @@ bufferevent_suspend_write_(struct bufferevent *bufev, bufferevent_suspend_flags 
 	struct bufferevent_private *bufev_private =
 	    EVUTIL_UPCAST(bufev, struct bufferevent_private, bev);
 	BEV_LOCK(bufev);
-	if (!bufev_private->write_suspended)
-		bufev->be_ops->disable(bufev, EV_WRITE);
+	if (!bufev_private->write_suspended) {
+		BEV_SWITCH(bufev, disable, bufev, EV_WRITE)
+	}
 	bufev_private->write_suspended |= what;
 	BEV_UNLOCK(bufev);
 }
@@ -106,8 +109,9 @@ bufferevent_unsuspend_write_(struct bufferevent *bufev, bufferevent_suspend_flag
 	    EVUTIL_UPCAST(bufev, struct bufferevent_private, bev);
 	BEV_LOCK(bufev);
 	bufev_private->write_suspended &= ~what;
-	if (!bufev_private->write_suspended && (bufev->enabled & EV_WRITE))
-		bufev->be_ops->enable(bufev, EV_WRITE);
+	if (!bufev_private->write_suspended && (bufev->enabled & EV_WRITE)) {
+		BEV_SWITCH(bufev, enable, bufev, EV_WRITE);
+	}
 	BEV_UNLOCK(bufev);
 }
 
@@ -290,7 +294,8 @@ bufferevent_trigger_event(struct bufferevent *bufev, short what, int options)
 int
 bufferevent_init_common_(struct bufferevent_private *bufev_private,
     struct event_base *base,
-    const struct bufferevent_ops *ops,
+    const enum bufferevent_type type,
+    off_t offset,
     enum bufferevent_options options)
 {
 	struct bufferevent *bufev = &bufev_private->bev;
@@ -314,7 +319,8 @@ bufferevent_init_common_(struct bufferevent_private *bufev_private,
 	evutil_timerclear(&bufev->timeout_read);
 	evutil_timerclear(&bufev->timeout_write);
 
-	bufev->be_ops = ops;
+	bufev->be_type = type;
+	bufev->mem_offset = offset;
 
 	bufferevent_ratelim_init_(bufev_private);
 
@@ -472,8 +478,13 @@ bufferevent_enable(struct bufferevent *bufev, short event)
 
 	bufev->enabled |= event;
 
-	if (impl_events && bufev->be_ops->enable(bufev, impl_events) < 0)
-		r = -1;
+	if (impl_events) {
+		int ret = 0;
+		BEV_SWITCH_RET(bufev, ret, enable, bufev, impl_events)
+
+		if (ret < 0)
+			r = -1;
+	}
 
 	bufferevent_decref_and_unlock_(bufev);
 	return r;
@@ -497,8 +508,7 @@ bufferevent_set_timeouts(struct bufferevent *bufev,
 		evutil_timerclear(&bufev->timeout_write);
 	}
 
-	if (bufev->be_ops->adj_timeouts)
-		r = bufev->be_ops->adj_timeouts(bufev);
+	BEV_SWITCH_OPS_RET(bufev, r, bufferevent_generic_adj_existing_timeouts_, bufferevent_generic_adj_timeouts_, bufferevent_generic_adj_timeouts_, bufferevent_generic_adj_timeouts_, be_openssl_adj_timeouts, bufev)
 	BEV_UNLOCK(bufev);
 
 	return r;
@@ -540,7 +550,10 @@ bufferevent_disable_hard_(struct bufferevent *bufev, short event)
 	bufev->enabled &= ~event;
 
 	bufev_private->connecting = 0;
-	if (bufev->be_ops->disable(bufev, event) < 0)
+
+	int ret = 0;
+	BEV_SWITCH_RET(bufev, ret, disable, bufev, event)
+	if (ret < 0)
 		r = -1;
 
 	BEV_UNLOCK(bufev);
@@ -555,7 +568,9 @@ bufferevent_disable(struct bufferevent *bufev, short event)
 	BEV_LOCK(bufev);
 	bufev->enabled &= ~event;
 
-	if (bufev->be_ops->disable(bufev, event) < 0)
+	int ret = 0;
+	BEV_SWITCH_RET(bufev, ret, disable, bufev, event)
+	if (ret < 0)
 		r = -1;
 
 	BEV_UNLOCK(bufev);
@@ -647,8 +662,7 @@ bufferevent_flush(struct bufferevent *bufev,
 {
 	int r = -1;
 	BEV_LOCK(bufev);
-	if (bufev->be_ops->flush)
-		r = bufev->be_ops->flush(bufev, iotype, mode);
+	BEV_SWITCH_RET(bufev, r, flush, bufev, iotype, mode)
 	BEV_UNLOCK(bufev);
 	return r;
 }
@@ -696,8 +710,7 @@ bufferevent_decref_and_unlock_(struct bufferevent *bufev)
 		return 0;
 	}
 
-	if (bufev->be_ops->unlink)
-		bufev->be_ops->unlink(bufev);
+	BEV_SWITCH(bufev, unlink, bufev)
 
 	/* Okay, we're out of references. Let's finalize this once all the
 	 * callbacks are done running. */
@@ -734,8 +747,7 @@ bufferevent_finalize_cb_(struct event_callback *evcb, void *arg_)
 	underlying = bufferevent_get_underlying(bufev);
 
 	/* Clean up the shared info */
-	if (bufev->be_ops->destruct)
-		bufev->be_ops->destruct(bufev);
+	BEV_SWITCH(bufev, destruct, bufev)
 
 	/* XXX what happens if refcnt for these buffers is > 1?
 	 * The buffers can share a lock with this bufferevent object,
@@ -759,7 +771,7 @@ bufferevent_finalize_cb_(struct event_callback *evcb, void *arg_)
 		    EVTHREAD_LOCKTYPE_RECURSIVE);
 
 	/* Free the actual allocated memory. */
-	mm_free(((char*)bufev) - bufev->be_ops->mem_offset);
+	mm_free(((char*)bufev) - bufev->mem_offset);
 
 	/* Release the reference to underlying now that we no longer need the
 	 * reference to it.  We wait this long mainly in case our lock is
@@ -849,8 +861,7 @@ bufferevent_setfd(struct bufferevent *bev, evutil_socket_t fd)
 	int res = -1;
 	d.fd = fd;
 	BEV_LOCK(bev);
-	if (bev->be_ops->ctrl)
-		res = bev->be_ops->ctrl(bev, BEV_CTRL_SET_FD, &d);
+	BEV_SWITCH_RET(bev, res, ctrl, bev, BEV_CTRL_SET_FD, &d)
 	BEV_UNLOCK(bev);
 	return res;
 }
@@ -862,8 +873,7 @@ bufferevent_getfd(struct bufferevent *bev)
 	int res = -1;
 	d.fd = -1;
 	BEV_LOCK(bev);
-	if (bev->be_ops->ctrl)
-		res = bev->be_ops->ctrl(bev, BEV_CTRL_GET_FD, &d);
+	BEV_SWITCH_RET(bev, res, ctrl, bev, BEV_CTRL_GET_FD, &d)
 	BEV_UNLOCK(bev);
 	return (res<0) ? -1 : d.fd;
 }
@@ -888,8 +898,7 @@ bufferevent_cancel_all_(struct bufferevent *bev)
 	union bufferevent_ctrl_data d;
 	memset(&d, 0, sizeof(d));
 	BEV_LOCK(bev);
-	if (bev->be_ops->ctrl)
-		bev->be_ops->ctrl(bev, BEV_CTRL_CANCEL_ALL, &d);
+	BEV_SWITCH(bev, ctrl, bev, BEV_CTRL_CANCEL_ALL, &d)
 	BEV_UNLOCK(bev);
 }
 
@@ -910,8 +919,7 @@ bufferevent_get_underlying(struct bufferevent *bev)
 	int res = -1;
 	d.ptr = NULL;
 	BEV_LOCK(bev);
-	if (bev->be_ops->ctrl)
-		res = bev->be_ops->ctrl(bev, BEV_CTRL_GET_UNDERLYING, &d);
+	BEV_SWITCH_RET(bev, res, ctrl, bev, BEV_CTRL_GET_UNDERLYING, &d)
 	BEV_UNLOCK(bev);
 	return (res<0) ? NULL : d.ptr;
 }

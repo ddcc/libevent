@@ -246,83 +246,75 @@ union bufferevent_ctrl_data {
 	evutil_socket_t fd;
 };
 
-/**
-   Implementation table for a bufferevent: holds function pointers and other
-   information to make the various bufferevent types work.
-*/
-struct bufferevent_ops {
-	/** The name of the bufferevent's type. */
-	const char *type;
-	/** At what offset into the implementation type will we find a
-	    bufferevent structure?
-
-	    Example: if the type is implemented as
-	    struct bufferevent_x {
-	       int extra_data;
-	       struct bufferevent bev;
-	    }
-	    then mem_offset should be offsetof(struct bufferevent_x, bev)
-	*/
-	off_t mem_offset;
-
-	/** Enables one or more of EV_READ|EV_WRITE on a bufferevent.  Does
-	    not need to adjust the 'enabled' field.  Returns 0 on success, -1
-	    on failure.
-	 */
-	int (*enable)(struct bufferevent *, short);
-
-	/** Disables one or more of EV_READ|EV_WRITE on a bufferevent.  Does
-	    not need to adjust the 'enabled' field.  Returns 0 on success, -1
-	    on failure.
-	 */
-	int (*disable)(struct bufferevent *, short);
-
-	/** Detatches the bufferevent from related data structures. Called as
-	 * soon as its reference count reaches 0. */
-	void (*unlink)(struct bufferevent *);
-
-	/** Free any storage and deallocate any extra data or structures used
-	    in this implementation. Called when the bufferevent is
-	    finalized.
-	 */
-	void (*destruct)(struct bufferevent *);
-
-	/** Called when the timeouts on the bufferevent have changed.*/
-	int (*adj_timeouts)(struct bufferevent *);
-
-	/** Called to flush data. */
-	int (*flush)(struct bufferevent *, short, enum bufferevent_flush_mode);
-
-	/** Called to access miscellaneous fields. */
-	int (*ctrl)(struct bufferevent *, enum bufferevent_ctrl_op, union bufferevent_ctrl_data *);
-
-};
-
-extern const struct bufferevent_ops bufferevent_ops_socket;
-extern const struct bufferevent_ops bufferevent_ops_filter;
-extern const struct bufferevent_ops bufferevent_ops_pair;
-
-#define BEV_IS_SOCKET(bevp) ((bevp)->be_ops == &bufferevent_ops_socket)
-#define BEV_IS_FILTER(bevp) ((bevp)->be_ops == &bufferevent_ops_filter)
-#define BEV_IS_PAIR(bevp) ((bevp)->be_ops == &bufferevent_ops_pair)
+#define BEV_IS_SOCKET(bevp) ((bevp)->be_type == BEV_TYPE_SOCKET)
+#define BEV_IS_FILTER(bevp) ((bevp)->be_type == BEV_TYPE_FILTER)
+#define BEV_IS_PAIR(bevp) ((bevp)->be_type == BEV_TYPE_PAIR)
 
 #if defined(EVENT__HAVE_OPENSSL)
-extern const struct bufferevent_ops bufferevent_ops_openssl;
-#define BEV_IS_OPENSSL(bevp) ((bevp)->be_ops == &bufferevent_ops_openssl)
+#define BEV_IS_OPENSSL(bevp) ((bevp)->be_type == BEV_TYPE_OPENSSL)
 #else
 #define BEV_IS_OPENSSL(bevp) 0
 #endif
 
 #ifdef _WIN32
-extern const struct bufferevent_ops bufferevent_ops_async;
-#define BEV_IS_ASYNC(bevp) ((bevp)->be_ops == &bufferevent_ops_async)
+#define BEV_IS_ASYNC(bevp) ((bevp)->be_type == BEV_TYPE_ASYNC)
 #else
 #define BEV_IS_ASYNC(bevp) 0
 #endif
 
+#define BEV_SWITCH(bevp, op, ...) BEV_SWITCH_OPS(bevp, be_socket_##op, be_filter_##op, be_pair_##op, be_async_##op, be_openssl_##op, __VA_ARGS__)
+#define BEV_SWITCH_RET(bevp, ret, op, ...) BEV_SWITCH_OPS_RET(bevp, ret, be_socket_##op, be_filter_##op, be_pair_##op, be_async_##op, be_openssl_##op, __VA_ARGS__)
+
+#if defined(EVENT__HAVE_OPENSSL) && defined(_WIN32)
+#define BEV_SWITCH_OPS(bevp, socket, filter, pair, async, openssl, ...) switch (bevp->be_type) {\
+case BEV_TYPE_SOCKET: socket(__VA_ARGS__); break;\
+case BEV_TYPE_FILTER: filter(__VA_ARGS__); break;\
+case BEV_TYPE_PAIR: pair(__VA_ARGS__); break;\
+case BEV_TYPE_ASYNC: async(__VA_ARGS__); break;\
+case BEV_TYPE_OPENSSL: openssl(__VA_ARGS__); break;\
+}
+#define BEV_SWITCH_OPS_RET(bevp, ret, socket, filter, pair, async, openssl, ...) switch (bevp->be_type) {\
+case BEV_TYPE_SOCKET: ret = socket(__VA_ARGS__); break;\
+case BEV_TYPE_FILTER: ret = filter(__VA_ARGS__); break;\
+case BEV_TYPE_PAIR: ret = pair(__VA_ARGS__); break;\
+case BEV_TYPE_ASYNC: ret = async(__VA_ARGS__); break;\
+case BEV_TYPE_OPENSSL: ret = openssl(__VA_ARGS__); break;\
+}
+#elif defined(EVENT__HAVE_OPENSSL) && !defined(_WIN32)
+#define BEV_SWITCH_OPS(bevp, socket, filter, pair, async, openssl, ...) switch (bevp->be_type) {\
+case BEV_TYPE_SOCKET: socket(__VA_ARGS__); break;\
+case BEV_TYPE_FILTER: filter(__VA_ARGS__); break;\
+case BEV_TYPE_PAIR: pair(__VA_ARGS__); break;\
+case BEV_TYPE_ASYNC: break;\
+case BEV_TYPE_OPENSSL: openssl(__VA_ARGS__); break;\
+}
+#define BEV_SWITCH_OPS_RET(bevp, ret, socket, filter, pair, async, openssl, ...) switch (bevp->be_type) {\
+case BEV_TYPE_SOCKET: ret = socket(__VA_ARGS__); break;\
+case BEV_TYPE_FILTER: ret = filter(__VA_ARGS__); break;\
+case BEV_TYPE_PAIR: ret = pair(__VA_ARGS__); break;\
+case BEV_TYPE_ASYNC: break;\
+case BEV_TYPE_OPENSSL: ret = openssl(__VA_ARGS__); break;\
+}
+#else
+#define BEV_SWITCH_OPS(bevp, socket, filter, pair, async, openssl, ...) switch (bevp->be_type) {\
+case BEV_TYPE_SOCKET: socket(__VA_ARGS__); break;\
+case BEV_TYPE_FILTER: filter(__VA_ARGS__); break;\
+case BEV_TYPE_PAIR: pair(__VA_ARGS__); break;\
+case BEV_TYPE_ASYNC: async(__VA_ARGS__); break;\
+case BEV_TYPE_OPENSSL: openssl(__VA_ARGS__); break;\
+}
+#define BEV_SWITCH_OPS_RET(bevp, ret, socket, filter, pair, async, openssl, ...) switch (bevp->be_type) {\
+case BEV_TYPE_SOCKET: ret = socket(__VA_ARGS__); break;\
+case BEV_TYPE_FILTER: ret = filter(__VA_ARGS__); break;\
+case BEV_TYPE_PAIR: ret = pair(__VA_ARGS__); break;\
+case BEV_TYPE_ASYNC: ret = async(__VA_ARGS__); break;\
+case BEV_TYPE_OPENSSL: ret = openssl(__VA_ARGS__); break;\
+}
+#endif
+
 /** Initialize the shared parts of a bufferevent. */
 EVENT2_EXPORT_SYMBOL
-int bufferevent_init_common_(struct bufferevent_private *, struct event_base *, const struct bufferevent_ops *, enum bufferevent_options options);
+int bufferevent_init_common_(struct bufferevent_private *, struct event_base *, const enum bufferevent_type , off_t, enum bufferevent_options options);
 
 /** For internal use: temporarily stop all reads on bufev, until the conditions
  * in 'what' are over. */
@@ -504,6 +496,42 @@ int bufferevent_ratelim_init_(struct bufferevent_private *bev);
 #ifdef __cplusplus
 }
 #endif
+
+int be_socket_enable(struct bufferevent *, short);
+int be_socket_disable(struct bufferevent *, short);
+void be_socket_unlink(struct bufferevent *);
+void be_socket_destruct(struct bufferevent *);
+int be_socket_flush(struct bufferevent *, short, enum bufferevent_flush_mode);
+int be_socket_ctrl(struct bufferevent *, enum bufferevent_ctrl_op, union bufferevent_ctrl_data *);
+
+int be_filter_enable(struct bufferevent *, short);
+int be_filter_disable(struct bufferevent *, short);
+void be_filter_unlink(struct bufferevent *);
+void be_filter_destruct(struct bufferevent *);
+int be_filter_flush(struct bufferevent *, short , enum bufferevent_flush_mode);
+int be_filter_ctrl(struct bufferevent *, enum bufferevent_ctrl_op, union bufferevent_ctrl_data *);
+
+int be_pair_enable(struct bufferevent *, short);
+int be_pair_disable(struct bufferevent *, short);
+void be_pair_unlink(struct bufferevent *);
+void be_pair_destruct(struct bufferevent *);
+int be_pair_flush(struct bufferevent *, short, enum bufferevent_flush_mode);
+int be_pair_ctrl(struct bufferevent *, enum bufferevent_ctrl_op, union bufferevent_ctrl_data *);
+
+int be_async_enable(struct bufferevent *, short);
+int be_async_disable(struct bufferevent *, short);
+void be_async_unlink(struct bufferevent *);
+void be_async_destruct(struct bufferevent *);
+int be_async_flush(struct bufferevent *, short, enum bufferevent_flush_mode);
+int be_async_ctrl(struct bufferevent *, enum bufferevent_ctrl_op, union bufferevent_ctrl_data *);
+
+int __attribute__((weak)) be_openssl_enable(struct bufferevent *, short);
+int __attribute__((weak)) be_openssl_disable(struct bufferevent *, short);
+void __attribute__((weak)) be_openssl_unlink(struct bufferevent *);
+void __attribute__((weak)) be_openssl_destruct(struct bufferevent *);
+int __attribute__((weak)) be_openssl_adj_timeouts(struct bufferevent *);
+int __attribute__((weak)) be_openssl_flush(struct bufferevent *bufev, short iotype, enum bufferevent_flush_mode mode);
+int __attribute__((weak)) be_openssl_ctrl(struct bufferevent *, enum bufferevent_ctrl_op, union bufferevent_ctrl_data *);
 
 
 #endif /* BUFFEREVENT_INTERNAL_H_INCLUDED_ */

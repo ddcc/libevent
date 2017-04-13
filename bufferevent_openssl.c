@@ -327,27 +327,6 @@ struct bufferevent_openssl {
 	unsigned old_state : 2;
 };
 
-static int be_openssl_enable(struct bufferevent *, short);
-static int be_openssl_disable(struct bufferevent *, short);
-static void be_openssl_unlink(struct bufferevent *);
-static void be_openssl_destruct(struct bufferevent *);
-static int be_openssl_adj_timeouts(struct bufferevent *);
-static int be_openssl_flush(struct bufferevent *bufev,
-    short iotype, enum bufferevent_flush_mode mode);
-static int be_openssl_ctrl(struct bufferevent *, enum bufferevent_ctrl_op, union bufferevent_ctrl_data *);
-
-const struct bufferevent_ops bufferevent_ops_openssl = {
-	"ssl",
-	evutil_offsetof(struct bufferevent_openssl, bev.bev),
-	be_openssl_enable,
-	be_openssl_disable,
-	be_openssl_unlink,
-	be_openssl_destruct,
-	be_openssl_adj_timeouts,
-	be_openssl_flush,
-	be_openssl_ctrl,
-};
-
 /* Given a bufferevent, return a pointer to the bufferevent_openssl that
  * contains it, if any. */
 static inline struct bufferevent_openssl *
@@ -1149,7 +1128,7 @@ be_openssl_outbuf_cb(struct evbuffer *buf,
 }
 
 
-static int
+int
 be_openssl_enable(struct bufferevent *bev, short events)
 {
 	struct bufferevent_openssl *bev_ssl = upcast(bev);
@@ -1174,7 +1153,7 @@ be_openssl_enable(struct bufferevent *bev, short events)
 	return (r1 < 0 || r2 < 0) ? -1 : 0;
 }
 
-static int
+int
 be_openssl_disable(struct bufferevent *bev, short events)
 {
 	struct bufferevent_openssl *bev_ssl = upcast(bev);
@@ -1193,7 +1172,7 @@ be_openssl_disable(struct bufferevent *bev, short events)
 	return 0;
 }
 
-static void
+void
 be_openssl_unlink(struct bufferevent *bev)
 {
 	struct bufferevent_openssl *bev_ssl = upcast(bev);
@@ -1221,7 +1200,7 @@ be_openssl_unlink(struct bufferevent *bev)
 	}
 }
 
-static void
+void
 be_openssl_destruct(struct bufferevent *bev)
 {
 	struct bufferevent_openssl *bev_ssl = upcast(bev);
@@ -1239,7 +1218,7 @@ be_openssl_destruct(struct bufferevent *bev)
 	}
 }
 
-static int
+int
 be_openssl_adj_timeouts(struct bufferevent *bev)
 {
 	struct bufferevent_openssl *bev_ssl = upcast(bev);
@@ -1251,7 +1230,7 @@ be_openssl_adj_timeouts(struct bufferevent *bev)
 	}
 }
 
-static int
+int
 be_openssl_flush(struct bufferevent *bufev,
     short iotype, enum bufferevent_flush_mode mode)
 {
@@ -1287,7 +1266,7 @@ be_openssl_set_fd(struct bufferevent_openssl *bev_ssl,
 	return 0;
 }
 
-static int
+int
 be_openssl_ctrl(struct bufferevent *bev,
     enum bufferevent_ctrl_op op, union bufferevent_ctrl_data *data)
 {
@@ -1351,8 +1330,8 @@ bufferevent_openssl_new_impl(struct event_base *base,
 
 	bev_p = &bev_ssl->bev;
 
-	if (bufferevent_init_common_(bev_p, base,
-		&bufferevent_ops_openssl, tmp_options) < 0)
+	if (bufferevent_init_common_(bev_p, base, BEV_TYPE_OPENSSL,
+		evutil_offsetof(struct bufferevent_openssl, bev.bev), tmp_options) < 0)
 		goto err;
 
 	/* Don't explode if we decide to realloc a chunk we're writing from in

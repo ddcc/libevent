@@ -72,7 +72,18 @@ struct bufferevent {
 	struct event_base *ev_base;
 	/** Pointer to a table of function pointers to set up how this
 	    bufferevent behaves. */
-	const struct bufferevent_ops *be_ops;
+	enum bufferevent_type be_type;
+
+    /** At what offset into the implementation type will we find a
+        bufferevent structure?
+        Example: if the type is implemented as
+        struct bufferevent_x {
+           int extra_data;
+           struct bufferevent bev;
+        }
+        then mem_offset should be offsetof(struct bufferevent_x, bev)
+    */
+    off_t mem_offset;
 
 	/** A read event that triggers when a timeout has happened or a socket
 	    is ready to read data.  Only used by some subtypes of

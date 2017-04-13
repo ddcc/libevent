@@ -59,17 +59,9 @@
 #include "util-internal.h"
 
 /* prototypes */
-static int be_filter_enable(struct bufferevent *, short);
-static int be_filter_disable(struct bufferevent *, short);
-static void be_filter_unlink(struct bufferevent *);
-static void be_filter_destruct(struct bufferevent *);
-
 static void be_filter_readcb(struct bufferevent *, void *);
 static void be_filter_writecb(struct bufferevent *, void *);
 static void be_filter_eventcb(struct bufferevent *, short, void *);
-static int be_filter_flush(struct bufferevent *bufev,
-    short iotype, enum bufferevent_flush_mode mode);
-static int be_filter_ctrl(struct bufferevent *, enum bufferevent_ctrl_op, union bufferevent_ctrl_data *);
 
 static void bufferevent_filtered_inbuf_cb(struct evbuffer *buf,
     const struct evbuffer_cb_info *cbinfo, void *arg);
@@ -98,18 +90,6 @@ struct bufferevent_filtered {
 	bufferevent_filter_cb process_out;
 	/** User-supplied argument to the filters. */
 	void *context;
-};
-
-const struct bufferevent_ops bufferevent_ops_filter = {
-	"filter",
-	evutil_offsetof(struct bufferevent_filtered, bev.bev),
-	be_filter_enable,
-	be_filter_disable,
-	be_filter_unlink,
-	be_filter_destruct,
-	bufferevent_generic_adj_timeouts_,
-	be_filter_flush,
-	be_filter_ctrl,
 };
 
 /* Given a bufferevent that's really the bev filter of a bufferevent_filtered,
@@ -190,7 +170,8 @@ bufferevent_filter_new(struct bufferevent *underlying,
 		return NULL;
 
 	if (bufferevent_init_common_(&bufev_f->bev, underlying->ev_base,
-				    &bufferevent_ops_filter, tmp_options) < 0) {
+    	BEV_TYPE_FILTER, evutil_offsetof(struct bufferevent_filtered, bev.bev),
+		tmp_options) < 0) {
 		mm_free(bufev_f);
 		return NULL;
 	}
@@ -225,7 +206,7 @@ bufferevent_filter_new(struct bufferevent *underlying,
 	return downcast(bufev_f);
 }
 
-static void
+void
 be_filter_unlink(struct bufferevent *bev)
 {
 	struct bufferevent_filtered *bevf = upcast(bev);
@@ -254,7 +235,7 @@ be_filter_unlink(struct bufferevent *bev)
 	}
 }
 
-static void
+void
 be_filter_destruct(struct bufferevent *bev)
 {
 	struct bufferevent_filtered *bevf = upcast(bev);
@@ -269,7 +250,7 @@ be_filter_destruct(struct bufferevent *bev)
 		evbuffer_remove_cb_entry(bev->output, bevf->outbuf_cb);
 }
 
-static int
+int
 be_filter_enable(struct bufferevent *bev, short event)
 {
 	struct bufferevent_filtered *bevf = upcast(bev);
@@ -284,7 +265,7 @@ be_filter_enable(struct bufferevent *bev, short event)
 	return 0;
 }
 
-static int
+int
 be_filter_disable(struct bufferevent *bev, short event)
 {
 	struct bufferevent_filtered *bevf = upcast(bev);
@@ -569,7 +550,7 @@ be_filter_eventcb(struct bufferevent *underlying, short what, void *me_)
 	BEV_UNLOCK(bev);
 }
 
-static int
+int
 be_filter_flush(struct bufferevent *bufev,
     short iotype, enum bufferevent_flush_mode mode)
 {
@@ -594,7 +575,7 @@ be_filter_flush(struct bufferevent *bufev,
 	return processed_any;
 }
 
-static int
+int
 be_filter_ctrl(struct bufferevent *bev, enum bufferevent_ctrl_op op,
     union bufferevent_ctrl_data *data)
 {
@@ -607,10 +588,10 @@ be_filter_ctrl(struct bufferevent *bev, enum bufferevent_ctrl_op op,
 	case BEV_CTRL_SET_FD:
 		bevf = upcast(bev);
 
-		if (bevf->underlying &&
-			bevf->underlying->be_ops &&
-			bevf->underlying->be_ops->ctrl) {
-		    return (bevf->underlying->be_ops->ctrl)(bevf->underlying, op, data);
+		if (bevf->underlying) {
+			int ret = 0;
+			BEV_SWITCH_RET(bevf->underlying, ret, ctrl, bevf->underlying, op, data)
+			return ret;
 		}
 		EVUTIL_FALLTHROUGH;
 

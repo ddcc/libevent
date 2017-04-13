@@ -173,6 +173,14 @@ enum bufferevent_options {
 	BEV_OPT_UNLOCK_CALLBACKS = (1<<3)
 };
 
+enum bufferevent_type {
+  BEV_TYPE_SOCKET,
+  BEV_TYPE_FILTER,
+  BEV_TYPE_PAIR,
+  BEV_TYPE_ASYNC,
+  BEV_TYPE_OPENSSL
+};
+
 /**
   Create a new socket bufferevent over an existing socket.
 

@@ -96,8 +96,8 @@ bufferevent_pair_elt_new(struct event_base *base,
 	struct bufferevent_pair *bufev;
 	if (! (bufev = mm_calloc(1, sizeof(struct bufferevent_pair))))
 		return NULL;
-	if (bufferevent_init_common_(&bufev->bev, base, &bufferevent_ops_pair,
-		options)) {
+	if (bufferevent_init_common_(&bufev->bev, base, BEV_TYPE_PAIR,
+		evutil_offsetof(struct bufferevent_pair, bev.bev), options)) {
 		mm_free(bufev);
 		return NULL;
 	}
@@ -221,7 +221,7 @@ be_pair_outbuf_cb(struct evbuffer *outbuf,
 	decref_and_unlock(downcast(bev_pair));
 }
 
-static int
+int
 be_pair_enable(struct bufferevent *bufev, short events)
 {
 	struct bufferevent_pair *bev_p = upcast(bufev);
@@ -249,7 +249,7 @@ be_pair_enable(struct bufferevent *bufev, short events)
 	return 0;
 }
 
-static int
+int
 be_pair_disable(struct bufferevent *bev, short events)
 {
 	if (events & EV_READ) {
@@ -261,7 +261,7 @@ be_pair_disable(struct bufferevent *bev, short events)
 	return 0;
 }
 
-static void
+void
 be_pair_unlink(struct bufferevent *bev)
 {
 	struct bufferevent_pair *bev_p = upcast(bev);
@@ -274,7 +274,7 @@ be_pair_unlink(struct bufferevent *bev)
 }
 
 /* Free *shared* lock in the latest be (since we share it between two of them). */
-static void
+void
 be_pair_destruct(struct bufferevent *bev)
 {
 	struct bufferevent_pair *bev_p = upcast(bev);
@@ -301,7 +301,7 @@ be_pair_destruct(struct bufferevent *bev)
 	bev_p->unlinked_partner = NULL;
 }
 
-static int
+int
 be_pair_flush(struct bufferevent *bev, short iotype,
     enum bufferevent_flush_mode mode)
 {
@@ -352,14 +352,9 @@ bufferevent_pair_get_partner(struct bufferevent *bev)
 	return partner;
 }
 
-const struct bufferevent_ops bufferevent_ops_pair = {
-	"pair_elt",
-	evutil_offsetof(struct bufferevent_pair, bev.bev),
-	be_pair_enable,
-	be_pair_disable,
-	be_pair_unlink,
-	be_pair_destruct,
-	bufferevent_generic_adj_timeouts_,
-	be_pair_flush,
-	NULL, /* ctrl */
-};
+int
+be_pair_ctrl(struct bufferevent *bev, enum bufferevent_ctrl_op op,
+    union bufferevent_ctrl_data *data)
+{
+	return 0;
+}
